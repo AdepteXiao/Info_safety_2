@@ -1,13 +1,32 @@
+import json
+import os
+
 from utils import miller_rabin, ferma, nod, mod_inverse
 import random
 from gmpy2 import powmod
 
+FILES_FOLDER = "files\\"
+KEYS_FOLDER = FILES_FOLDER + "keys\\"
+ENC_FOLDER = FILES_FOLDER + "encrypted\\"
+DEC_FOLDER = FILES_FOLDER + "decrypted\\"
+
 
 class RSA:
-
-    def __init__(self, num: int = 32):
-        self.s, self.N, self.e = self.get_public_key()
+    def __init__(self, num: int = 28):
+        self.s, self.N, self.e = self.get_keys()
         self.num = num
+        self.make_folders(
+            FILES_FOLDER,
+            KEYS_FOLDER,
+            ENC_FOLDER,
+            DEC_FOLDER
+        )
+
+    @staticmethod
+    def make_folders(*folders):
+        for folder in folders:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
 
     @staticmethod
     def find_prime(lb: int, rb: int, tests_k: int) -> int:
@@ -19,7 +38,7 @@ class RSA:
                 return num
 
     @staticmethod
-    def get_public_key():
+    def get_keys():
         while True:
             P = RSA.find_prime(10 ** 9, 10 ** 10, 10)
             Q = RSA.find_prime(10 ** 17, 10 ** 18, 10)
@@ -33,8 +52,28 @@ class RSA:
         e = mod_inverse(s, d)
         return s, N, e
 
+    def save_keys(self, filename: str) -> None:
+        key_data = {
+            "N": self.N,
+            "e": self.e,
+            "s": self.s
+        }
 
-class Encrypt:
+        with open(filename, 'w') as key_file:
+            json.dump(key_data, key_file, indent=4)
+
+    def load_keys(self, filename: str) -> None:
+        with open(filename, 'r') as key_file:
+            key_data = json.load(key_file)
+        self.N = key_data["N"]
+        self.e = key_data["e"]
+        self.s = key_data["s"]
+
+    def enc_dec_factory(self):
+        return Encrypter(self.s, self.N), Decrypter(self.e, self.N)
+
+
+class Encrypter:
     def __init__(self, s, N):
         self.s = s
         self.N = N
@@ -46,17 +85,14 @@ class Encrypt:
                   range(num_blocks)]
         zero_num = self.block_len - remainder
         if remainder > 0:
-            last_block = data[num_blocks * self.block_len:]
-            last_block += bytes([0] * zero_num)
+            last_block = data[num_blocks * self.block_len:] + bytes([0] * zero_num)
             blocks.append(last_block)
         return blocks, zero_num
 
-    def transformation(self, data):
+    def encrypt(self, data):
         res = []
         nums = []
-        in_bytes = data.to_bytes(11, byteorder="big")
-        print(in_bytes)
-        blocks, zero_num = self.split_into_blocks(in_bytes)
+        blocks, zero_num = self.split_into_blocks(data)
         for block in blocks:
             block = int.from_bytes(block, byteorder="big")
             nums.append(int(powmod(block, self.s, self.N)))
@@ -66,38 +102,43 @@ class Encrypt:
         res.insert(0, block_len.to_bytes(1, byteorder="big"))
         res.insert(1, zero_num.to_bytes(1, byteorder="big"))
         return b''.join(res)
+        # return res
 
 
-class Decrypt:
+class Decrypter:
     def __init__(self, e, N):
         self.e = e
         self.N = N
         self.block_len = 1
         self.zero_num = 0
+        self.n_len = (len(format(self.N, 'b'))) // 8 - 1
 
     def decrypt(self, data):
         res = []
-        self.block_len = int.from_bytes(data[0].to_bytes(1, byteorder='big'), byteorder="big")
-        self.zero_num = int.from_bytes(data[1].to_bytes(1, byteorder='big'), byteorder="big")
+        self.block_len = data[0]
+        self.zero_num = data[1]
         data = data[2:]
-        print(data)
         blocks = [data[i * self.block_len: (i + 1) * self.block_len] for i in
                   range(len(data) // self.block_len)]
-        print(blocks)
         for block in blocks:
             block = int.from_bytes(block, byteorder="big")
             res.append(int(powmod(block, self.e, self.N))
-                       .to_bytes(self.block_len, byteorder="big"))
+                       .to_bytes(self.n_len, byteorder="big"))
         res = b''.join(res)
-        print(res)
         res = res[:-self.zero_num]
-        # return int.from_bytes(res, byteorder="big")
         return res
+
 
 if __name__ == '__main__':
     rsa = RSA()
-    encr = Encrypt(rsa.s, rsa.N)
-    res = encr.transformation(1298476)
-    print(res)
-    decr = Decrypt(rsa.e, rsa.N)
-    print(decr.decrypt(res))
+    rsa.load_keys(KEYS_FOLDER + "keys.json")
+    encr, decr = rsa.enc_dec_factory()
+
+    with open(FILES_FOLDER + "test.txt", "rb") as file:
+        file_bytes = file.read()
+
+    enc = encr.encrypt(file_bytes)
+    print(enc)
+    dec = decr.decrypt(enc)
+    with open(FILES_FOLDER + "res.txt", "wb") as file:
+        file.write(dec)
